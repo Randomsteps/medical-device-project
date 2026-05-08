@@ -1,0 +1,130 @@
+我把今天我们敲过的所有核心代码、配置文件和排查逻辑，全部浓缩进了下面这份**《Linux 部署与排查实战手册 (V1.0)》**。建议你把这部分文本直接复制保存到你的 Notion、Obsidian 或者备忘录里，以后再遇到类似问题，直接拿出来“抄作业”。
+
+🚀 个人专属 Linux 部署与排查实战手册 (V1.0)
+🛡️ 实战一：建立工程护盾（Python 环境隔离）
+场景：准备部署新模型，怕把系统自带的 Python 环境搞崩溃。
+核心逻辑：不碰全局环境，在工程目录下建沙箱，系统服务直接调用沙箱内的绝对路径。
+
+Bash
+# 1. 创建环境存放目录
+mkdir -p ~/ai_project/envs
+
+# 2. 创建纯净沙箱 (名字叫 deploy_env)
+python3 -m venv ~/ai_project/envs/deploy_env
+
+# 3. 激活沙箱（临时终端调试用）
+source ~/ai_project/envs/deploy_env/bin/activate
+
+# 4. 验证是否成功（输出应该是你沙箱里的路径）
+which python3 
+⚙️ 实战二：后台服务托管（Systemd 守护进程）
+场景：模型推理代码写好了，需要它开机自启、后台静默运行、崩溃自动拉起。
+核心逻辑：交出终端控制权，写 Unit 文件让系统大管家接手。
+
+1. 编写配置文件
+Bash
+sudo nano /etc/systemd/system/aimodel.service
+2. 标准配置模板（直接抄）
+
+Ini, TOML
+[Unit]
+Description=My AI Model Inference Service
+After=network.target
+
+[Service]
+User=xie
+WorkingDirectory=/home/xie/ai_project/workspace/
+# 绝招：直接用沙箱的 Python 去跑你的代码，不需要 source activate
+ExecStart=/home/xie/ai_project/envs/deploy_env/bin/python3 /home/xie/ai_project/workspace/main.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+3. 启动与查错“三板斧”
+
+Bash
+# 每次改完 service 文件，必须让系统重新认识它
+sudo systemctl daemon-reload
+
+# 启动、停止、设置开机自启
+sudo systemctl start aimodel
+sudo systemctl stop aimodel
+sudo systemctl enable aimodel
+
+# 【超高频使用】实时查看这个后台程序的日志
+journalctl -u aimodel -f
+🔍 实战三：破解依赖迷宫（修复 .so 动态库找不到）
+场景：运行 C/C++ 编译的程序或底层硬件驱动时，报错 error while loading shared libraries: libxxx.so: not found。
+核心逻辑：系统找不到库，要么给它临时指路，要么把它登记进系统通讯录。
+
+Bash
+# 1. 照妖镜确诊（看看到底缺哪个库）
+ldd ./app
+
+# -----------------------------------
+# 修复方案 A：临时隔离法（测试、改驱动时用）
+# 把当前目录 ($PWD) 拼接到环境变量的最前面
+export LD_LIBRARY_PATH=$PWD:$LD_LIBRARY_PATH
+
+# -----------------------------------
+# 修复方案 B：系统永久注册法（装全局环境、CUDA、CANN 时用）
+# 第一步：把库拷贝到系统公共仓库
+sudo cp libcustom_npu.so /usr/local/lib/
+# 第二步：【极其重要】刷新系统动态库通讯录！
+sudo ldconfig
+🚑 实战四：系统底层救急（网络换源 & 黑屏抢救）
+场景 A：apt install 下载极慢或卡死在 0%
+核心逻辑：把 Ubuntu 默认的国外下载地址强行替换为国内阿里云。
+
+Bash
+# 适用于 Ubuntu 24.04 的秒换源指令（sed 替换大法）
+sudo cp /etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list.d/ubuntu.sources.bak
+sudo sed -i 's/cn.archive.ubuntu.com/mirrors.aliyun.com/g' /etc/apt/sources.list.d/ubuntu.sources
+sudo sed -i 's/archive.ubuntu.com/mirrors.aliyun.com/g' /etc/apt/sources.list.d/ubuntu.sources
+sudo sed -i 's/security.ubuntu.com/mirrors.aliyun.com/g' /etc/apt/sources.list.d/ubuntu.sources
+
+# 换完源【必须】更新通讯录
+sudo apt update
+场景 B：虚拟机/服务器图形桌面突然黑屏、假死
+核心逻辑：桌面只是个软件，系统内核没死。切到底层终端重启桌面软件。
+
+Plaintext
+1. 按下组合键：Ctrl + Alt + F3 （进入 TTY 纯文本后台）
+2. 盲打输入用户名和密码登录
+3. 输入命令重启图形桌面：sudo systemctl restart gdm3
+（如果还是不行，直接 sudo reboot 安全重启）
+为了让你在未来排查问题时更有“手感”，我把这些实战案例封装成了一个交互式的**“Linux 战术排查控制台”**。你可以随时点击对应的故障场景，里面包含了我们今天讲过的所有底层逻辑和具体代码：
+
+
+
+docker问题：
+将今天的困难整理成“工程失败档案”和“实战参考手册”，这是最顶尖的工程师习惯。通过这些复盘，你不仅学会了如何使用 Docker，更重要的是你学会了如何调试一个复杂的分布式软件系统。以下是你以后的参考文档，建议保存至你的知识库（Notion/Obsidian）。📂 一、工程失败档案（排坑复盘）故障现象根本原因 (Root Cause)解决方案 (Solution)tag does not exist本地镜像名与云端仓库路径不匹配。使用 docker tag [ID] [用户名]/[镜像名]:[tag] 进行重命名。dial tcp ... connect refused代理配置未生效，或未给 Docker 守护进程配代理。修改 /etc/systemd/system/docker.service.d/http-proxy.conf 并重启守护进程。insufficient_scopeToken 权限不足（只读）。在网页端生成 Token 时，必须勾选 Write 权限。unauthorized / EOF命令行直接登录 sudo 权限不一致，或 Token 粘贴格式错误。使用 -u [用户名] 参数，或使用 Token 进行登录；注意粘贴方式 (Ctrl+Shift+V)。root/.docker/config 警告sudo 运行命令导致凭证存放在 root 目录。尽量避免 sudo 运行，将用户加入 docker 组。🚀 二、Docker 工程化部署标准手册 (V1.0)这份手册涵盖了你今天从 0 到 1 的所有关键动作，下次部署直接按顺序执行。Step 1: 环境初始化（仅需执行一次）如果是在新机器上，先解决代理问题，否则 pull/push 都会失败：Bash# 创建代理目录
+sudo mkdir -p /etc/systemd/system/docker.service.d
+
+# 写入代理配置 (替换为你宿主机的 IP)
+sudo tee /etc/systemd/system/docker.service.d/http-proxy.conf > /dev/null <<EOF
+[Service]
+Environment="HTTP_PROXY=http://192.168.153.1:7897/"
+Environment="HTTPS_PROXY=http://192.168.153.1:7897/"
+Environment="NO_PROXY=localhost,127.0.0.1,::1"
+EOF
+
+# 重启守护进程
+sudo systemctl daemon-reload
+sudo systemctl restart docker
+Step 2: 构建镜像 (Build)在 Dockerfile 所在目录下执行：Bash# -t 指定名称和标签，. 代表当前目录
+sudo docker build -t [你的用户名]/my-npu-model:v1 .
+Step 3: 安全登录 (Login)为了规避权限和网络问题，使用带代理的登录命令，并配合 Access Token：Bash# 使用 HTTPS_PROXY 临时环境变量登录
+sudo HTTPS_PROXY="http://192.168.153.1:7897" HTTP_PROXY="http://192.168.153.1:7897" docker login -u [你的用户名]
+# 当提示 Password 时，粘贴你的 'dckr_pat_' 格式的 Write 权限 Token
+Step 4: 推送分发 (Push)Bashsudo docker push [你的用户名]/my-npu-model:v1
+Step 5: 验证与清理 (Verify)Bash# 查看所有镜像
+sudo docker images
+
+# 彻底删除某个镜像 (释放空间)
+sudo docker rmi -f [镜像ID]
+
+# 彻底清理无用的容器 (防范垃圾堆积)
+sudo docker system prune -f
+💡 专家级心得总结用户身份隔离：sudo docker 和 docker 是两套不同的凭证系统（/root/.docker/ vs ~/.docker/）。永远优先尝试加入 docker 用户组（usermod -aG docker $USER）并重启终端，这样就不需要 sudo 了，也能避免绝大多数权限问题。网络透明化：当你遇到 connection refused，永远先检查是否给 Docker Daemon 配置了正确的 Proxy，这是所有国内开发者的第一道关。Token 是金钥匙：不要用主密码登录终端，养成使用 Personal Access Token 的习惯，既安全又能精准控制权限。
